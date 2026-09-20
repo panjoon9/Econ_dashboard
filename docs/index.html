@@ -2,23 +2,187 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>미국 경제지표 대시보드</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>미국 경제지표 대시보드 — CPI · 기준금리 · 실업률</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #0b1220; --panel: #121b2e; --panel-border: #253045;
+    --text: #e7ecf5; --muted: #8a94a6; --accent: #35c9c1;
+    --up: #ef6b6b; --down: #5b9bf0; --amber: #e8a648;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--text); font-family:'Inter', -apple-system, sans-serif; line-height:1.5; }
+  header{ padding:28px 36px 20px; border-bottom:1px solid var(--panel-border); }
+  header h1{ font-family:'Space Grotesk', sans-serif; font-size:21px; font-weight:600; margin-bottom:4px; }
+  header p{ color:var(--muted); font-size:13px; }
+  main{ max-width:1180px; margin:0 auto; padding:28px 36px 60px; }
+
+  .kpi-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:28px; }
+  .kpi{ background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; padding:18px 20px; }
+  .kpi .label{ color:var(--muted); font-size:12px; margin-bottom:10px; }
+  .kpi .value{ font-family:'IBM Plex Mono', monospace; font-size:28px; font-weight:600; }
+  .kpi .asof{ color:var(--muted); font-size:11px; margin-top:8px; font-family:'IBM Plex Mono', monospace; }
+  .kpi .delta{ font-family:'IBM Plex Mono', monospace; font-size:12px; margin-top:6px; }
+  .delta.warn{ color:var(--up); } .delta.ok{ color:var(--accent); }
+
+  .panel{ background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; padding:22px 24px; margin-bottom:20px; }
+  .panel h2{ font-family:'Space Grotesk', sans-serif; font-size:15px; font-weight:600; margin-bottom:4px; }
+  .panel .sub{ color:var(--muted); font-size:12px; margin-bottom:16px; }
+  .chart-box{ position:relative; height:340px; }
+
+  .status{ font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--muted); padding:12px 36px; }
+  .status.error{ color:var(--up); }
+
+  footer{ max-width:1180px; margin:0 auto; padding:0 36px 40px; color:var(--muted); font-size:11px; font-family:'IBM Plex Mono', monospace; line-height:1.7; }
+</style>
 </head>
 <body>
-<div id="statusMsg">데이터 불러오는 중...</div>
-<div id="mainContent" style="display:none;">
-  <canvas id="chartCpiRate"></canvas>
-  <canvas id="chartUn"></canvas>
-</div>
+
+<header>
+  <h1>미국 경제지표 대시보드</h1>
+  <p>CPI(물가) · 연방기금금리(밴드) · 실업률 — GitHub Actions로 매일 자동 갱신</p>
+</header>
+
+<div class="status" id="statusMsg">데이터 불러오는 중...</div>
+
+<main id="mainContent" style="display:none;">
+
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="label">CPI 전년 대비 상승률</div>
+      <div class="value" id="kpiCpi">—</div>
+      <div class="asof" id="kpiCpiDate">—</div>
+      <div class="delta" id="kpiCpiDelta">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label">연방기금금리(밴드)</div>
+      <div class="value" id="kpiRate">—</div>
+      <div class="asof" id="kpiRateDate">—</div>
+      <div class="delta" id="kpiRateDelta">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label">실업률</div>
+      <div class="value" id="kpiUn">—</div>
+      <div class="asof" id="kpiUnDate">—</div>
+      <div class="delta" id="kpiUnDelta">—</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>CPI vs 연방기금금리</h2>
+    <div class="sub">좌축: 기준금리(%, 밴드 하단~상단), 우축: CPI 전년 대비(%)</div>
+    <div class="chart-box"><canvas id="chartCpiRate"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>실업률 추이</h2>
+    <div class="sub">최근 3년간 미국 실업률 흐름</div>
+    <div class="chart-box"><canvas id="chartUn"></canvas></div>
+  </div>
+
+</main>
+
+<footer>
+  출처: FRED(CPIAUCSL, DFEDTARL, UNRATE) · 이 페이지는 <code>data/dashboard_data.json</code>을 열 때마다 새로 불러온다.<br>
+  그 JSON 파일은 GitHub Actions가 매일 자동으로 갱신한다(9장 애드온 4단계 참고). 데이터 자체가 오래돼 보인다면, 이 HTML이 아니라 Actions 실행 기록을 확인해야 한다.
+</footer>
 
 <script>
+function fmt(n, d = 1) { return Number(n).toFixed(d); }
+
 function renderDashboard(DATA) {
-  // 여기에 9.7절 애드온의 KPI 채우기, new Chart(...) 코드를 그대로 붙여넣는다.
-  // 단, 맨 위의 "const DATA = {...}" 하드코딩 줄은 없앤다. 이제 DATA는
-  // 아래 fetch가 함수 인자로 넘겨주기 때문이다.
+  // ── KPI 카드 채우기 ──
+  let lastCpi = DATA.cpi_vals.length - 1;
+  while (lastCpi >= 0 && DATA.cpi_vals[lastCpi] === null) lastCpi--;
+  if (lastCpi >= 0) {
+    document.getElementById('kpiCpi').textContent = fmt(DATA.cpi_vals[lastCpi]) + '%';
+    document.getElementById('kpiCpiDate').textContent = DATA.cpi_labels[lastCpi] + ' 기준';
+    if (lastCpi > 0 && DATA.cpi_vals[lastCpi - 1] !== null) {
+      const d = DATA.cpi_vals[lastCpi] - DATA.cpi_vals[lastCpi - 1];
+      document.getElementById('kpiCpiDelta').textContent = (d >= 0 ? '▲ ' : '▼ ') + Math.abs(d).toFixed(2) + '%p (전월비)';
+      document.getElementById('kpiCpiDelta').className = 'delta ' + (d >= 0 ? 'warn' : 'ok');
+    }
+  }
+
+  const lastR = DATA.rate_lower.length - 1;
+  document.getElementById('kpiRate').textContent = fmt(DATA.rate_lower[lastR], 2) + '–' + fmt(DATA.rate_upper[lastR], 2) + '%';
+  document.getElementById('kpiRateDate').textContent = DATA.rate_labels[lastR] + ' 기준';
+  if (lastR > 0) {
+    const prevLower = DATA.rate_lower[lastR - 1];
+    const curLower = DATA.rate_lower[lastR];
+    if (curLower > prevLower) {
+      document.getElementById('kpiRateDelta').textContent = '▲ ' + Math.round((curLower - prevLower) * 100) + 'bp 인상';
+      document.getElementById('kpiRateDelta').className = 'delta warn';
+    } else if (curLower < prevLower) {
+      document.getElementById('kpiRateDelta').textContent = '▼ ' + Math.round((prevLower - curLower) * 100) + 'bp 인하';
+      document.getElementById('kpiRateDelta').className = 'delta ok';
+    } else {
+      document.getElementById('kpiRateDelta').textContent = '동결';
+      document.getElementById('kpiRateDelta').className = 'delta ok';
+    }
+  }
+
+  const lastU = DATA.un_vals.length - 1;
+  document.getElementById('kpiUn').textContent = fmt(DATA.un_vals[lastU]) + '%';
+  document.getElementById('kpiUnDate').textContent = DATA.un_labels[lastU] + ' 기준';
+  if (lastU > 0) {
+    const d = DATA.un_vals[lastU] - DATA.un_vals[lastU - 1];
+    document.getElementById('kpiUnDelta').textContent = (d >= 0 ? '▲ ' : '▼ ') + Math.abs(d).toFixed(1) + '%p (전월비)';
+    document.getElementById('kpiUnDelta').className = 'delta ' + (d >= 0 ? 'warn' : 'ok');
+  }
+
+  // ── 차트 1: CPI vs 기준금리 ──
+  new Chart(document.getElementById('chartCpiRate'), {
+    type: 'line',
+    data: {
+      labels: DATA.cpi_labels,
+      datasets: [
+        { label: '기준금리 상단', data: DATA.rate_upper, borderColor: 'transparent', backgroundColor: 'rgba(91,155,240,0.12)', fill: '+1', pointRadius: 0, yAxisID: 'y', stepped: true },
+        { label: '기준금리 하단', data: DATA.rate_lower, borderColor: '#5b9bf0', backgroundColor: 'rgba(91,155,240,0.12)', borderWidth: 2, pointRadius: 0, yAxisID: 'y', stepped: true, fill: false },
+        { label: 'CPI 전년 대비(%)', data: DATA.cpi_vals, borderColor: '#ef6b6b', borderWidth: 2, pointRadius: 0, yAxisID: 'y1', tension: 0.15, spanGaps: true },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8a94a6', filter: (item) => item.text !== '기준금리 상단' } },
+        tooltip: { backgroundColor: '#121b2e', borderColor: '#253045', borderWidth: 1 }
+      },
+      scales: {
+        x: { ticks: { color: '#8a94a6', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { position: 'left', ticks: { color: '#5b9bf0' }, grid: { color: 'rgba(255,255,255,0.04)' }, title: { display: true, text: '기준금리(%)', color: '#5b9bf0' } },
+        y1: { position: 'right', ticks: { color: '#ef6b6b' }, grid: { display: false }, title: { display: true, text: 'CPI(%)', color: '#ef6b6b' } },
+      }
+    }
+  });
+
+  // ── 차트 2: 실업률 ──
+  new Chart(document.getElementById('chartUn'), {
+    type: 'line',
+    data: {
+      labels: DATA.un_labels,
+      datasets: [
+        { label: '실업률(%)', data: DATA.un_vals, borderColor: '#e8a648', backgroundColor: 'rgba(232,166,72,0.1)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.2 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { backgroundColor: '#121b2e', borderColor: '#253045', borderWidth: 1 }
+      },
+      scales: {
+        x: { ticks: { color: '#8a94a6', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#8a94a6' }, grid: { color: 'rgba(255,255,255,0.04)' }, title: { display: true, text: '실업률(%)', color: '#8a94a6' } },
+      }
+    }
+  });
 }
 
+// ── 데이터 불러오기 ──
 // 이 HTML과 같은 docs 폴더 안의 data/dashboard_data.json을 상대경로로 불러온다.
 // (GitHub Pages는 docs 폴더 "안"만 공개하므로, 폴더 밖으로 나가는 경로는 쓰지 않는다.)
 fetch('data/dashboard_data.json')
@@ -32,11 +196,11 @@ fetch('data/dashboard_data.json')
     renderDashboard(data);
   })
   .catch(err => {
-    document.getElementById('statusMsg').textContent =
-      '데이터를 불러오지 못했습니다 (' + err.message + '). ' +
-      'data/dashboard_data.json 파일이 있는지, GitHub Actions가 ' +
-      '정상 실행됐는지 확인하세요.';
+    const msg = document.getElementById('statusMsg');
+    msg.textContent = '데이터를 불러오지 못했습니다 (' + err.message + '). data/dashboard_data.json 파일이 있는지, GitHub Actions가 정상 실행됐는지 확인하세요.';
+    msg.classList.add('error');
   });
 </script>
+
 </body>
 </html>
