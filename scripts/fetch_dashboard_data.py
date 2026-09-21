@@ -28,7 +28,7 @@ def build_dashboard_json():
     # 1) 기준금리를 먼저 계산한다 - 이 월별 타임라인이 CPI 차트의 x축 기준이 된다
     rate = fetch_fred("DFEDTARL")
     rate = rate[rate["date"] >= cutoff]
-    rate_m = rate.set_index("date").resample("MS").first().reset_index()
+    rate_m = rate.set_index("date").resample("MS").last().reset_index()
     rate_labels = rate_m["date"].dt.strftime("%Y-%m").tolist()
     rate_lower = rate_m["value"].round(2).tolist()
     rate_upper = (rate_m["value"] + 0.25).round(2).tolist()
